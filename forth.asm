@@ -4,13 +4,13 @@ STD_INPUT_HANDLE       equ -10
 STD_OUTPUT_HANDLE      equ -11
 INPUT_BUFFER_SIZE      equ 256
 READ_CHUNK             equ 254   ; leave room to append '\n' or NULL, as appropriate. cf. input_buffer
-LINE_SIZE  equ 8
-LINES_PER_BLOCK  equ 16
-BLOCK_SIZE equ LINE_SIZE * LINES_PER_BLOCK
-BLOCKS_PER_SEGMENT equ 64
-SEGMENT_SIZE equ BLOCK_SIZE * BLOCKS_PER_SEGMENT
-DATA_STACK_SIZE equ 1024
-CELL_SIZE equ 8
+%define LINE_SIZE 8
+%define LINES_PER_BLOCK  16
+%define BLOCK_SIZE 128
+%define BLOCKS_PER_SEGMENT 64
+%define SEGMENT_SIZE 8192
+%define DATA_STACK_SIZE 1024
+%define CELL_SIZE 8
 
 ;word flags and mask
 %define f8PRIMITIVE 0b10000000
@@ -27,14 +27,16 @@ CELL_SIZE equ 8
 section .data
     newline db 10 ; newline character
     conin db "CONIN$", 0
+    segment dq 8192
+    data_stack_min dq 1024
+    input_buffer dq 256
 
 section .bss
-    input_buffer resb INPUT_BUFFER_SIZE ; reserve more than enough for a long one-liner. cf. READ_CHUNK
     num_bytes resd 1
     write_count resd 1
     old_mode resd 1
-    segment resb SEGMENT_SIZE
-    data_stack_min resq DATA_STACK_SIZE
+
+
     data_stack_max resq 1
     ds_index resd 1
 
@@ -55,11 +57,11 @@ main:
     push r15
 
     ; set up stack (First things first, but not necessarily in that order. -- Vigtor Borge)
-    mov dword [ds_index], -8 ; The first invalid 64-bit offset.
-    mov rax, [data_stack_min] ; data_stack_min is "upside down" from our downward growing stack
-    mov [data_stack_max], rax ; so stuff it into data_stack_max. (Numerically the lowest address, but forget that!)
+    mov dword [rel ds_index], -8 ; The first invalid 64-bit offset.
+    mov rax, [rel data_stack_min] ; data_stack_min is "upside down" from our downward growing stack
+    mov [rel data_stack_max], rax ; so stuff it into data_stack_max. (Numerically the lowest address, but forget that!)
     add rax, DATA_STACK_SIZE * 8 ; get the start of the stack into the register
-    mov [data_stack_min], rax ; data_stack_min now contains the address at the bottom of the logical stack.
+    mov [rel data_stack_min], rax ; data_stack_min now contains the address at the bottom of the logical stack.
     ; get stdin
     mov ecx, STD_INPUT_HANDLE
     call GetStdHandle
@@ -100,13 +102,14 @@ main:
     ;int3
     lea rdx, [rel num_bytes]
     ; TODO: the following never works. Figure out why.
-    cmp dword [rdx], 0
+    cmp rdx, 0
     je .read_failed          ; because user pressed ENTER without any input
 
     ; read succeeded and input_buffer, whose address is stored in r14, holds num_bytes characters
     mov eax, [rel num_bytes]
     lea rcx, [rel input_buffer]
     ; we're now pointing at the current line.
+    .next_word:
 
     sub rsp, 16
     call printf
@@ -121,7 +124,7 @@ main:
     jmp .exit_main
 
 .dup:
-    mov ecx, [ds_index]
+    mov ecx, [rel ds_index]
     ; ensure there's something to read.
     cmp ecx, 0
     ; ensure no underflow
@@ -130,25 +133,50 @@ main:
     ; calculate current stack pointer
     ; increment to the next place we want to write
     add ecx, CELL_SIZE
-    mov qword rax, [data_stack_min]
-    sub rax, ecx
+    lea rax, [rel data_stack_min]
+    sub rax, rcx
     ;rax is now where we want to write
-    mov rdx, [data_stack_max]
+    lea rdx, [rel data_stack_max]
     ;rdx now has the lowest allowable address
     cmp rax, rdx
-    jl .stack_overflow
+    jl .data_stack_overflow
 
     ;rax is at top + 1, so add 1 to get back to top
     add rax, CELL_SIZE
-    mov rcx, [rax]
+    mov  rcx, [rax]
 
     ; copy top int top + 1
     sub rax, CELL_SIZE
     mov [rax], rcx
-    ; ensure index is incremented
-    ; put
 
     jmp .next_word
+
+.swap:
+    ; ensure there are two things to read
+    mov rcx, [rel ds_index]
+    cmp rcx, 8
+    jl .data_stack_underflow
+
+    lea rax [rel data_stack_min]
+    mov rdx, rax
+    sub rax, rcx ; TOS address
+    add rcx, CELL_SIZE
+    sub rdx, rcx ; TOS - 1 address
+
+    mov r8, [rax]
+    mov r9, [rdx]
+    mov [rdx], r8
+    mov [rax], r9
+    jmp .next_word
+
+
+
+
+.data_stack_underflow:
+    jmp .exit_main
+
+.data_stack_overflow:
+    jmp .exit_main
 
 .exit_main:
     pop r15
