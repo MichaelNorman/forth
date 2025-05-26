@@ -1,29 +1,4 @@
 %include "forth_internals.ninc"
-;constants
-BITS 64
-STD_INPUT_HANDLE       equ -10
-STD_OUTPUT_HANDLE      equ -11
-INPUT_BUFFER_SIZE      equ 256
-READ_CHUNK             equ 254   ; leave room to append '\n' or NULL, as appropriate. cf. input_buffer
-%define LINE_SIZE 8
-%define LINES_PER_BLOCK  16
-%define BLOCK_SIZE 128
-%define BLOCKS_PER_SEGMENT 64
-%define SEGMENT_SIZE 8192
-%define DATA_STACK_SIZE 1024
-%define CELL_SIZE 8
-
-;word flags and mask
-%define f8PRIMITIVE 0b10000000
-%define f8IMMEDIATE 0b01000000
-%define m8WORD_LEN  0b00001111
-
-;word data bit pattern
-;|mask(4 bits):len(4 bits)|word (120)|code_pointer(32)/previous_pointer(32)/pad(64)|
-;^--------------qword----------------^---------------dword-----------------^-dword-^
-;^--------------qword----------------^-------------------qword---------------------^
-%define              WORD_SIZE_BYTE 16
-%define              WORD_SIZE_BIT  128
 
 section .data
     newline          db 10 ; newline character
@@ -164,7 +139,8 @@ main:
     jmp .next_word
 
 .swap:
-    ; ensure there are two things to read
+    ; N number of items back to swap with  r12
+    ; ensure there N two things to read
     mov rcx, [rel ds_index]
     cmp rcx, 8
     jl .data_stack_underflow
