@@ -1,0 +1,29 @@
+%ifndef FORTH_INTERNALS_NINC
+%define FORTH_INTERNALS_NINC
+
+
+%macro _overflow 0
+    ;N number of items to check post.  r8
+    ;M 'min' address                   r9
+    ;I index, unscaled                 r10
+    ;E end of stack.                   r11
+    add r10, r8 ; see where we'd end up
+    shl r10, 3 ; turn index into offset
+    sub r9, r10 ; move the pointer in the right direction
+    cmp r11, r9 ; are we inside our stack frame?
+    jg .data_stack_overflow
+%endmacro
+
+%macro _underflow 0
+    ;N number of items to check post.  r8
+    ;M 'min' address                   r9
+    ;I index, unscaled                 r10
+    ;E 'min' address, again            r11
+    sub r10, r8 ; see where we'd end up
+    shl r10, 3 ; turn index into offset
+    sub r9, r10 ; move the pointer in the right direction
+    cmp r11, r9 ; are we inside our stack frame?
+    jl .data_stack_underflow
+%endmacro
+
+%endif

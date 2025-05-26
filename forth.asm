@@ -1,3 +1,4 @@
+%include "forth_internals.ninc"
 ;constants
 BITS 64
 STD_INPUT_HANDLE       equ -10
@@ -21,24 +22,25 @@ READ_CHUNK             equ 254   ; leave room to append '\n' or NULL, as appropr
 ;|mask(4 bits):len(4 bits)|word (120)|code_pointer(32)/previous_pointer(32)/pad(64)|
 ;^--------------qword----------------^---------------dword-----------------^-dword-^
 ;^--------------qword----------------^-------------------qword---------------------^
-%define WORD_SIZE_BYTE 16
-%define WORD_SIZE_BIT  128
+%define              WORD_SIZE_BYTE 16
+%define              WORD_SIZE_BIT  128
 
 section .data
-    newline db 10 ; newline character
-    conin db "CONIN$", 0
-    segment dq 8192
-    data_stack_min dq 1024
-    input_buffer dq 256
+    newline          db 10 ; newline character
+    conin            db "CONIN$", 0
+    segment          dq SEGMENT_SIZE
+    data_stack_min   dq DATA_STACK_SIZE
+    input_buffer     dq INPUT_BUFFER_SIZE
+    stdin_handle     dq 0
+    stdout_handle    dq 0
+    stderr_handle    dq 0
 
 section .bss
-    num_bytes resd 1
-    write_count resd 1
-    old_mode resd 1
-
-
-    data_stack_max resq 1
-    ds_index resd 1
+    num_bytes        resd 1
+    write_count      resd 1
+    old_mode         resd 1
+    data_stack_max   resq 1
+    ds_index         resd 1
 
 section .text
     global main
@@ -67,7 +69,7 @@ main:
     call GetStdHandle
     cmp rax, -1
     je .stdin_failed
-    mov r12, rax       ; stdin
+    mov [rel stdin_handle], rax       ; stdin
     ; get stdout
     mov ecx, STD_OUTPUT_HANDLE
 
@@ -75,7 +77,7 @@ main:
 
     cmp rax, -1
     je .stdout_failed
-    mov r13, rax       ; stdout
+    mov [rel stdout_handle], rax       ; stdout
 
     ;lea r14, [rel input_buffer] ; load location of input_buffer for later
 
@@ -87,12 +89,12 @@ main:
     rep stosb
     ; set up for call to ReadFile
     ; set the current location in which to write the user's input
-    mov rcx, r12              ; hFile
+    mov rcx, [rel stdin_handle]     ; hFile
     lea rdx, [rel input_buffer]     ; lpBuffer
-    mov r8d, READ_CHUNK       ; nNumberOfBytesToRead
-    lea r9, [rel num_bytes]   ; lpNumberOfBytesRead
+    mov r8d, READ_CHUNK             ; nNumberOfBytesToRead
+    lea r9, [rel num_bytes]         ; lpNumberOfBytesRead
     sub rsp, 16
-    mov qword [rsp], 0        ; lpOverlapped, stored in first argument space
+    mov qword [rsp], 0              ; lpOverlapped, stored in first argument space
     call ReadFile
     add rsp, 16
     ;int3
@@ -123,7 +125,17 @@ main:
 .stdout_failed:
     jmp .exit_main
 
+.pick:
+    ;N how far back to pick. 1 is dup. 2 picks 2nd from top. ... r8
+    ;
+    ;mov r8, n
+    ;cmp r8,
 .dup:
+    ;N number of items to check post.  r8
+    ;M 'min' address                   r9
+    ;I index, unscaled                 r10
+    ;E end of stack.                   r11
+    ;R resume point.                   r12
     mov ecx, [rel ds_index]
     ; ensure there's something to read.
     cmp ecx, 0
@@ -157,7 +169,7 @@ main:
     cmp rcx, 8
     jl .data_stack_underflow
 
-    lea rax [rel data_stack_min]
+    lea rax, [rel data_stack_min]
     mov rdx, rax
     sub rax, rcx ; TOS address
     add rcx, CELL_SIZE
@@ -168,9 +180,6 @@ main:
     mov [rdx], r8
     mov [rax], r9
     jmp .next_word
-
-
-
 
 .data_stack_underflow:
     jmp .exit_main

@@ -7,7 +7,7 @@ set(OBJ_FILE ${CMAKE_BINARY_DIR}/forth.obj)
 # Build the object file from NASM source
 add_custom_command(
         OUTPUT ${OBJ_FILE}
-        COMMAND nasm -f win64 ${SRC_FILE} -o ${OBJ_FILE}
+        COMMAND nasm -I ${CMAKE_SOURCE_DIR} -f win64 ${SRC_FILE} -o ${OBJ_FILE}
         DEPENDS ${SRC_FILE}
         COMMENT "Assembling ${SRC_FILE}"
 )
