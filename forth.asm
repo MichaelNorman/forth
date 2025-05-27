@@ -106,10 +106,13 @@ main:
     jmp .exit_main
 
 .pick:
-    ;N how far back to pick. 1 is dup. 2 picks 2nd from top. ... r8
-    ;
-    ;mov r8, n
-    ;cmp r8,
+    ;N how far back to pick. 0 is dup. 1 picks 2nd from top. ... r8
+    _underflow r8
+    mov rax, 1
+    _overflow rax
+    _unchecked_get_relative r8, rax
+    _push rax, r13
+
 .dup:
     ;N number of items to check post.  r8
     ;M 'min' address                   r9
@@ -120,7 +123,7 @@ main:
     _overflow r8
      ; (index_reg, back_reg, ds_base_reg, output_reg)
      ;mov
-    _unchecked_get_relative r8, rax, r13
+    _unchecked_get_relative r8, rax
     _push r8, rax ; use r13 for scratch space
     ;jmp .next_word
 
@@ -130,9 +133,9 @@ main:
     _underflow r13
     ; (back_reg, output_reg, addr_scratch_reg)
     mov r8, 0
-    _unchecked_get_relative r8, rax, r13
+    _unchecked_get_relative r8, rax
     inc r8
-    _unchecked_get_relative r8, r9, r13
+    _unchecked_get_relative r8, r9
 
     ; (back_reg, input_reg, addr_scratch_reg)
     _unchecked_set_relative r8, rax, r13
