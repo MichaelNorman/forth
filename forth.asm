@@ -125,8 +125,19 @@ main:
     ;jmp .next_word
 
 .swap:
-    ; ensure there N things to read
+    ; ensure there 2 things to swap
+    mov r13, 2
+    _underflow r13
+    ; (back_reg, output_reg, addr_scratch_reg)
+    mov r8, 0
+    _unchecked_get_relative r8, rax, r13
+    inc r8
+    _unchecked_get_relative r8, r9, r13
 
+    ; (back_reg, input_reg, addr_scratch_reg)
+    _unchecked_set_relative r8, rax, r13
+    dec r8
+    _unchecked_set_relative r8, r9, r13
     ;jmp .next_word
 
 .data_stack_underflow:
