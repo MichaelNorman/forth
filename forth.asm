@@ -117,11 +117,11 @@ main:
     ;E end of stack.                   r11
     ;R resume point.                   r12
     _underflow r8
-    _overflow r8, rax
+    _overflow r8
      ; (index_reg, back_reg, ds_base_reg, output_reg)
      ;mov
     _unchecked_get_relative r8, rax, r13
-    _push r8, rax, r13 ; use r13 for scratch space
+    _push r8, rax ; use r13 for scratch space
     ;jmp .next_word
 
 .swap:
@@ -139,6 +139,16 @@ main:
     dec r8
     _unchecked_set_relative r8, r9, r13
     ;jmp .next_word
+
+.plus:
+    mov r13, 2
+    _underflow r13
+    ; (output_reg, scratch_reg)
+    _pop rax, r13
+    _pop r8, r13
+    add rax, r8
+    ;(input_reg, offset_scratch_reg)
+    _push rax, r13
 
 .data_stack_underflow:
     jmp .exit_main
