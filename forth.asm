@@ -4,18 +4,18 @@ section .data
     newline          db 10 ; newline character
     conin            db "CONIN$", 0
     segment          dq SEGMENT_SIZE
-    data_stack_min   dq DATA_STACK_SIZE
-    input_buffer     dq INPUT_BUFFER_SIZE
+    ;ds_base          dq DATA_STACK_SIZE
     stdin_handle     dq 0
     stdout_handle    dq 0
     stderr_handle    dq 0
+    ds_top           dq 0 ; top of empty stack
 
 section .bss
     num_bytes        resd 1
     write_count      resd 1
     old_mode         resd 1
-    data_stack_max   resq 1
-    ds_index         resd 1
+    ds_base          resq DATA_STACK_SIZE
+    input_buffer     resq INPUT_BUFFER_SIZE
 
 section .text
     global main
@@ -33,12 +33,20 @@ main:
     push r14
     push r15
 
+
     ; set up stack (First things first, but not necessarily in that order. -- Vigtor Borge)
-    mov dword [rel ds_index], -8 ; The first invalid 64-bit offset.
-    mov rax, [rel data_stack_min] ; data_stack_min is "upside down" from our downward growing stack
-    mov [rel data_stack_max], rax ; so stuff it into data_stack_max. (Numerically the lowest address, but forget that!)
-    add rax, DATA_STACK_SIZE * 8 ; get the start of the stack into the register
-    mov [rel data_stack_min], rax ; data_stack_min now contains the address at the bottom of the logical stack.
+    ; The following four lines move ds_base to the address at the end of its allocated space. This preserves 0-based
+    ; indices if we do [rel ds_base - index * CELL_SIZE]
+    mov r12, ds_base ; ds_base is "upside down" from our downward growing stack
+    mov r8, DATA_STACK_LAST_INDEX
+    shl r8, 3
+    add r14, r8
+    %undef ds_base ; reusing this could lead to subtle bugs or subtle corruption. r14 will contain the value for the
+                   ; program lifetime.
+    mov r15, [rel ds_top]
+    %undef ds_top  ; reusing this could lead to subtle bugs or subtle corruption. r15 will contain the value for the
+                   ; program lifetime
+
     ; get stdin
     mov ecx, STD_INPUT_HANDLE
     call GetStdHandle
@@ -53,8 +61,6 @@ main:
     cmp rax, -1
     je .stdout_failed
     mov [rel stdout_handle], rax       ; stdout
-
-    ;lea r14, [rel input_buffer] ; load location of input_buffer for later
 
 .line_loop:
     ; zero out input_buffer
@@ -82,7 +88,6 @@ main:
     cmp rdx, 0
     je .read_failed          ; because user pressed ENTER without any input
 
-    ; read succeeded and input_buffer, whose address is stored in r14, holds num_bytes characters
     mov eax, [rel num_bytes]
     lea rcx, [rel input_buffer]
     ; we're now pointing at the current line.
@@ -111,51 +116,18 @@ main:
     ;I index, unscaled                 r10
     ;E end of stack.                   r11
     ;R resume point.                   r12
-    mov ecx, [rel ds_index]
-    ; ensure there's something to read.
-    cmp ecx, 0
-    ; ensure no underflow
-    jl .data_stack_underflow
-    ; ensure no overflow
-    ; calculate current stack pointer
-    ; increment to the next place we want to write
-    add ecx, CELL_SIZE
-    lea rax, [rel data_stack_min]
-    sub rax, rcx
-    ;rax is now where we want to write
-    lea rdx, [rel data_stack_max]
-    ;rdx now has the lowest allowable address
-    cmp rax, rdx
-    jl .data_stack_overflow
-
-    ;rax is at top + 1, so add 1 to get back to top
-    add rax, CELL_SIZE
-    mov  rcx, [rax]
-
-    ; copy top int top + 1
-    sub rax, CELL_SIZE
-    mov [rax], rcx
-
-    jmp .next_word
+    _underflow r8
+    _overflow r8, rax
+     ; (index_reg, back_reg, ds_base_reg, output_reg)
+     ;mov
+    _unchecked_get_relative r8, rax, r13
+    _push r8, rax, r13 ; use r13 for scratch space
+    ;jmp .next_word
 
 .swap:
-    ; N number of items back to swap with  r12
-    ; ensure there N two things to read
-    mov rcx, [rel ds_index]
-    cmp rcx, 8
-    jl .data_stack_underflow
+    ; ensure there N things to read
 
-    lea rax, [rel data_stack_min]
-    mov rdx, rax
-    sub rax, rcx ; TOS address
-    add rcx, CELL_SIZE
-    sub rdx, rcx ; TOS - 1 address
-
-    mov r8, [rax]
-    mov r9, [rdx]
-    mov [rdx], r8
-    mov [rax], r9
-    jmp .next_word
+    ;jmp .next_word
 
 .data_stack_underflow:
     jmp .exit_main

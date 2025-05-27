@@ -13,6 +13,7 @@ READ_CHUNK             equ 254   ; leave room to append '\n' or NULL, as appropr
 %define BLOCKS_PER_SEGMENT 64
 %define SEGMENT_SIZE 8192
 %define DATA_STACK_SIZE 1024
+%define DATA_STACK_LAST_INDEX 1023
 %define CELL_SIZE 8
 
 ;word flags and mask
@@ -27,28 +28,45 @@ READ_CHUNK             equ 254   ; leave room to append '\n' or NULL, as appropr
 %define              WORD_SIZE_BYTE 16
 %define              WORD_SIZE_BIT  128
 
-%macro _overflow 0 ; TODO: simplify to index-based
-    ;N number of items to check post.  r8
-    ;M 'min' address                   r9
-    ;I index, unscaled                 r10
-    ;E end of stack.                   r11
-    add r10, r8 ; see where we'd end up
-    shl r10, 3 ; turn index into offset
-    sub r9, r10 ; move the pointer in the right direction
-    cmp r11, r9 ; are we inside our stack frame?
+%macro _overflow 2 ; (index_distance_reg, scratch_reg)
+    mov %2, r15
+    add %2, %1
+    cmp %2, DATA_STACK_LAST_INDEX
     jg .data_stack_overflow
 %endmacro
 
-%macro _underflow 0 ; TODO: simplify to index-based
-    ;N number of items to check prior. r8
-    ;M 'min' address                   r9
-    ;I index, unscaled                 r10
-    ;E 'min' address, again            r11
-    sub r10, r8 ; see where we'd end up
-    shl r10, 3 ; turn index into offset
-    sub r9, r10 ; move the pointer in the right direction
-    cmp r11, r9 ; are we inside our stack frame?
-    jl .data_stack_underflow
+%macro _underflow 1 ; (index_distance_reg)
+    cmp r15, %1 ; are we inside our stack frame?
+    jb .data_stack_underflow
+%endmacro
+
+%macro _pop 2 ; (output_reg, scratch_reg)
+    mov %2, 1 ;that's why it's scratch
+    _underflow %2
+    mov %2, r15
+    shl %2, 3
+    mov %1, [rel r14 - %2]
+    dec r15
+%endmacro
+
+%macro _push 3 ; (input_reg, offset_scratch_reg, addr_scratch_reg)
+    mov %2, 1
+    _overflow %2, %3
+    mov %2, r15 ;clobber. It's fine.
+    shl %2, 3 ; scale by CELL_SIZE
+    mov %3, r14
+    sub %3, %2
+    mov [%3], %1
+    inc r15
+%endmacro
+
+%macro _unchecked_get_relative 3; (back_reg, output_reg, addr_scratch_reg)
+    mov %2, r15
+    sub %2, %1
+    shl %2, 3
+    mov %3, r14
+    sub %3, %2
+    mov %2, [%3]
 %endmacro
 
 %endif
