@@ -49,17 +49,17 @@ main:
                    ; program lifetime
 
     ; get stdin
-    mov ecx, STD_INPUT_HANDLE
+    mov rcx, STD_INPUT_HANDLE
     call GetStdHandle
-    cmp rax, -1
+    cmp rax, -1 ; valid?
     je .stdin_failed
     mov [rel stdin_handle], rax       ; stdin
     ; get stdout
-    mov ecx, STD_OUTPUT_HANDLE
+    mov rcx, STD_OUTPUT_HANDLE
 
     call GetStdHandle
 
-    cmp rax, -1
+    cmp rax, -1 ; valid?
     je .stdout_failed
     mov [rel stdout_handle], rax       ; stdout
 
@@ -84,20 +84,17 @@ main:
     test rax, rax
     je .read_failed          ; because reading failed
     ;int3
-    lea rdx, [rel num_bytes]
-    ; TODO: the following never works. Figure out why.
+    mov rdx, [rel num_bytes] ; TODO: test this. Went from `lea`to `mov`
     cmp rdx, 0
     je .read_failed          ; because user pressed ENTER without any input
 
-    mov eax, [rel num_bytes]
-    lea rcx, [rel input_buffer]
-    ; we're now pointing at the current line.
+    ; TODO: Rework this into Forth's `auit` loop.
     .next_word:
 
     sub rsp, 16
     call printf
     add rsp, 16
-    jmp .line_loop
+    jmp .line_loop ; TODO: Rework this into Forth's `auit` loop.
 
 .read_failed:
     jmp .exit_main
