@@ -4,7 +4,6 @@ section .data
     newline          db 10 ; newline character
     conin            db "CONIN$", 0
     segment          dq SEGMENT_SIZE
-    ;ds_base          dq DATA_STACK_SIZE
     stdin_handle     dq 0
     stdout_handle    dq 0
     stderr_handle    dq 0
@@ -13,7 +12,7 @@ section .data
 section .bss
     num_bytes        resd 1
     write_count      resd 1
-    old_mode         resd 1
+    old_mode         resd 1 ; place to hold the console mode before we reset it
     ds_base          resq DATA_STACK_SIZE
     input_buffer     resq INPUT_BUFFER_SIZE
 
@@ -27,20 +26,22 @@ section .text
 main:
     push rbp
     mov rbp, rsp
-    sub rsp, 32
+    ; Free up some registers
     push r12
     push r13
     push r14
     push r15
+    ; reserve shadow space
+    sub rsp, 32
 
 
     ; set up stack (First things first, but not necessarily in that order. -- Vigtor Borge)
     ; The following four lines move ds_base to the address at the end of its allocated space. This preserves 0-based
     ; indices if we do [rel ds_base - index * CELL_SIZE]
-    mov r12, ds_base ; ds_base is "upside down" from our downward growing stack
-    mov r8, DATA_STACK_LAST_INDEX
-    shl r8, 3
-    add r14, r8
+    lea r12, [rel ds_base] ; ds_base is "upside down" from our downward growing stack
+    mov r8, DATA_STACK_LAST_INDEX ; the pseudo-size of the buffer, which will properly relocate ds_base
+    shl r8, 3 ;calculate the pseudo-size of the  buffer
+    add r14, r8 ; calculate the "base" of the downward-growing stack (effectively: base + size - CELL_SIZE)
     %undef ds_base ; reusing this could lead to subtle bugs or subtle corruption. r14 will contain the value for the
                    ; program lifetime.
     mov r15, [rel ds_top]
@@ -152,6 +153,38 @@ main:
     add rax, r8
     ;(input_reg, offset_scratch_reg)
     _push rax, r13
+
+.drop:
+    mov r13, 1
+    _underflow r13
+    dec r15
+
+.nip:
+    mov r13, 2
+    _underflow r13
+    mov r13, r15
+    dec r13
+    shl r13, 3
+    mov r12, r14
+    sub r12, r13
+    mov r11, [r12]
+    sub r12, CELL_SIZE
+    mov [r12], r11
+    dec r15
+
+.over: ; ( x1 x2 -- x1 x2 x1 )
+    mov r13, 2
+    ;_udnderflow r13
+    mov r13, 1
+    _overflow r13
+    ;_unchecked_get_relative
+
+
+.tuck: ;( x1 x2 -- x2 x1 x2 )
+    mov r13, 2
+    ;_udnderflow r13
+    mov r13, 1
+    _overflow r13 ; TODO: UNFINISHED
 
 .data_stack_underflow:
     jmp .exit_main

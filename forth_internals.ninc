@@ -54,6 +54,7 @@ READ_CHUNK             equ 254   ; leave room to append '\n' or NULL, as appropr
     mov %2, 1
     _overflow %2
     mov %2, r15 ;clobber. It's fine.
+    dec %2 ;TOS into index
     shl %2, 3 ; scale by CELL_SIZE
     neg %2
     add %2, r14
