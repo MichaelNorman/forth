@@ -2,12 +2,18 @@
 
 section .data
     newline          db 10 ; newline character
-    conin            db "CONIN$", 0
     segment          dq SEGMENT_SIZE
     stdin_handle     dq 0
     stdout_handle    dq 0
     stderr_handle    dq 0
-    ds_top           dq 0 ; top of empty stack
+    ds_top           dq 0 ; top of empty stack,  the index where the next `push` operation will place an item.
+    abort_state      db 0;
+    conin             db "CONIN$", 0
+    pre_msg           db "Getting ready to fail.", 10, 0
+    abort_msg         db "Aborted. TOS = 0. Ready", 10, 0
+    stdin_failed_msg  db "Failed to get stdin.", 10, 0
+    stdout_failed_msg db "Failed to get stdout.", 10, 0
+    handle_fmt        db "GetStdHandle returned: %llx", 10, 0
 
 section .bss
     num_bytes        resd 1
@@ -22,7 +28,9 @@ section .text
     extern ReadFile
     ;extern WriteFile
     extern printf
+    extern puts
     extern GetLastError
+
 main:
     push rbp
     mov rbp, rsp
@@ -34,36 +42,56 @@ main:
     ; reserve shadow space
     sub rsp, 32
 
-
-    ; set up stack (First things first, but not necessarily in that order. -- Vigtor Borge)
+    ; set up stack (First thins first, but not necessarily in that order. -- Vigtor Borge)
     ; The following four lines move ds_base to the address at the end of its allocated space. This preserves 0-based
-    ; indices if we do [rel ds_base - index * CELL_SIZE]
+    ; indices if we do [rel ds_base - index * 8]
     lea r12, [rel ds_base] ; ds_base is "upside down" from our downward growing stack
     mov r8, DATA_STACK_LAST_INDEX ; the pseudo-size of the buffer, which will properly relocate ds_base
     shl r8, 3 ;calculate the pseudo-size of the  buffer
-    add r14, r8 ; calculate the "base" of the downward-growing stack (effectively: base + size - CELL_SIZE)
+    add r14, r8 ; calculate the "base" of the downward-growing stack (effectively: base + size - 8)
     %undef ds_base ; reusing this could lead to subtle bugs or subtle corruption. r14 will contain the value for the
                    ; program lifetime.
-    mov r15, [rel ds_top]
+    mov r15, 0
     %undef ds_top  ; reusing this could lead to subtle bugs or subtle corruption. r15 will contain the value for the
                    ; program lifetime
-
+    ; THE FOLLOWING LINES SUCCEED
+    lea rcx, [rel pre_msg]
+    call puts
     ; get stdin
-    mov rcx, STD_INPUT_HANDLE
+    mov ecx, GET_STDIN_HANDLE
     call GetStdHandle
-    cmp rax, -1 ; valid?
+    cmp rax, -1
     je .stdin_failed
-    mov [rel stdin_handle], rax       ; stdin
+    ; THE FOLLOWING LINE FAILS
+    lea rcx, [rel handle_fmt]
+    mov rdx, rax
+    call printf
+    default rel
+    mov [stdin_handle], rax       ; stdin
+    ; THE FOLLOWING LINES NEVER RUN
+    lea rcx, [rel abort_msg]
+    call puts
     ; get stdout
-    mov rcx, STD_OUTPUT_HANDLE
-
+    mov ecx, GET_STDOUT_HANDLE
     call GetStdHandle
 
     cmp rax, -1 ; valid?
     je .stdout_failed
+
     mov [rel stdout_handle], rax       ; stdout
 
-.line_loop:
+    ;testing abort message logic
+    or byte [rel abort_state], NO_ABORT
+
+.abort:
+    mov r15, 0 ; throw away the stack, but leave the values there.
+    test byte [rel abort_state], NO_ABORT
+    jnz .quit
+    lea  rcx, [rel abort_msg]
+    call puts
+    and byte [rel abort_state], ~NO_ABORT
+
+.quit:
     ; zero out input_buffer
     mov rdi, input_buffer ; load address of input_buffer
     mov rcx, 256 ;
@@ -89,18 +117,22 @@ main:
     je .read_failed          ; because user pressed ENTER without any input
 
     ; TODO: Rework this into Forth's `auit` loop.
-    .next_word:
+    ;jmp .quit
 
     sub rsp, 16
     call printf
     add rsp, 16
-    jmp .line_loop ; TODO: Rework this into Forth's `auit` loop.
+    ;jmp .line_loop ; TODO: Rework this into Forth's `auit` loop.
 
 .read_failed:
     jmp .exit_main
 .stdin_failed:
+    lea rcx, [rel stdin_failed_msg]
+    call puts
     jmp .exit_main
 .stdout_failed:
+    lea rcx, [rel stdout_failed_msg]
+    call puts
     jmp .exit_main
 
 .pick:
@@ -165,7 +197,7 @@ main:
     mov r12, r14
     sub r12, r13
     mov r11, [r12]
-    sub r12, CELL_SIZE
+    sub r12, 8
     mov [r12], r11
     dec r15
 
