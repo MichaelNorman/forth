@@ -2,10 +2,10 @@
 
 section .data
     newline          db 10 ; newline character
-    segment          dq SEGMENT_SIZE
-    stdin_handle     dq 0
-    stdout_handle    dq 0
-    stderr_handle    dq 0
+    segment_size          dq SEGMENT_SIZE
+    ;stdin_handle     dq 0
+    ;stdout_handle    dq 0
+    ;stderr_handle    dq 0
     ds_top           dq 0 ; top of empty stack,  the index where the next `push` operation will place an item.
     abort_state      db 0;
     conin             db "CONIN$", 0
@@ -14,6 +14,7 @@ section .data
     stdin_failed_msg  db "Failed to get stdin.", 10, 0
     stdout_failed_msg db "Failed to get stdout.", 10, 0
     handle_fmt        db "GetStdHandle returned: %llx", 10, 0
+    last_error_fmt    db "Last error code was: %lu", 10, 0
 
 section .bss
     num_bytes        resd 1
@@ -21,6 +22,9 @@ section .bss
     old_mode         resd 1 ; place to hold the console mode before we reset it
     ds_base          resq DATA_STACK_SIZE
     input_buffer     resq INPUT_BUFFER_SIZE
+    stdin_handle resq 1
+    stdout_handle resq 1
+    stderr_handle resq 1
 
 section .text
     global main
@@ -60,17 +64,23 @@ main:
     ; get stdin
     mov ecx, GET_STDIN_HANDLE
     call GetStdHandle
+    call GetLastError
+    lea rcx, [rel last_error_fmt]
+    mov rdx, rax
+    call printf
     cmp rax, -1
     je .stdin_failed
-    ; THE FOLLOWING LINE FAILS
     lea rcx, [rel handle_fmt]
     mov rdx, rax
     call printf
-    default rel
-    mov [stdin_handle], rax       ; stdin
+
+    ;default rel
+    ; THE FOLLOWING LINE FAILS
+    mov [rel stdin_handle], rdx       ; stdin
     ; THE FOLLOWING LINES NEVER RUN
     lea rcx, [rel abort_msg]
     call puts
+
     ; get stdout
     mov ecx, GET_STDOUT_HANDLE
     call GetStdHandle
@@ -79,7 +89,8 @@ main:
     je .stdout_failed
 
     mov [rel stdout_handle], rax       ; stdout
-
+    lea rcx, [rel abort_msg]
+    call puts
     ;testing abort message logic
     or byte [rel abort_state], NO_ABORT
 
