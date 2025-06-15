@@ -14,6 +14,13 @@ section .data
     abort_msg         db "Aborted. TOS = 0. Ready", 10, 0
     stdin_failed_msg  db "Failed to get stdin.", 10, 0
     stdout_failed_msg db "Failed to get stdout.", 10, 0
+    read_failed_msg   db "Read failed.", 10, 0
+    ok                db "Bytes read: %d. OK.", 10, 0
+    prompt            db ":> ", 0
+    bytes_read_fmt    db "Bytes read: %d", 10, 0
+    crlf              db 0x0d, 0x0a, 0
+    space_eoe         db " eoe "
+    cycle_promptless  db 0
 
 section .bss
     num_bytes        resd 1
@@ -33,6 +40,7 @@ section .text
     extern printf
     extern puts
     extern GetLastError
+    extern strcmp
 
 main:
     push rbp
@@ -43,6 +51,7 @@ main:
     push r14
     push r15
     ; !!--------------ALIGNED------------------!!
+    sub rsp, 32
 
     ; Set up stack ("First things first, but not necessarily in that order." -- Vigtor Borge)
     ; The following four lines move ds_base to the address at the end of its allocated space. This preserves 0-based
@@ -59,17 +68,14 @@ main:
 
     ; get stdin
     mov ecx, GET_STDIN_HANDLE
-    sub rsp, 32
     call GetStdHandle
-    add rsp, 32
     cmp rax, -1
     je .stdin_failed
+    mov [rel stdin_handle], rax
 
     ; get stdout
     mov ecx, GET_STDOUT_HANDLE
-    sub rsp, 32
     call GetStdHandle
-    add rsp, 32
     cmp rax, -1 ; valid?
     je .stdout_failed
 
@@ -102,34 +108,88 @@ main:
 ;   jump to .quit:
 
 .quit:
+    ; print OK and the prompt
+    cmp byte [rel cycle_promptless], 0
+    mov byte [rel cycle_promptless], 0
+    jne .promptless
+    mov edx, [rel num_bytes]
+    lea rcx, [rel ok]
+    call printf
+    lea rcx, [rel prompt]
+    call printf
+    .promptless:
     ; zero out input_buffer
     mov rdi, input_buffer ; load address of input_buffer
     ; get a line of input at least 8 = 4 + len("eoe") + 1 bytes shorter than the buffer size, starting 4 bytes in
     mov rcx, 256 ;
     xor eax, eax
     rep stosb
+
     ; set up for call to ReadFile
     ; set the current location in which to write the user's input
     mov rcx, [rel stdin_handle]     ; hFile
-    lea rdx, [rel input_buffer + 4]     ; lpBuffer
-    mov r8d, 248                    ; nNumberOfBytesToRead: 256 - len(dword) - len("eoe") - len("\0")
+    lea rdx, [rel input_buffer]     ; lpBuffer
+    mov r8d, 250                    ; nNumberOfBytesToRead: 256 - len(" eoe ") - len("\0")
     lea r9, [rel num_bytes]         ; lpNumberOfBytesRead
-    sub rsp, 48
+    sub rsp, 16
     mov qword [rsp + 0x20], 0              ; lpOverlapped, stored in first argument space
     call ReadFile
-    add rsp, 48
+    add rsp, 16
     ; rax contains success or failure
     test rax, rax
     jz .read_failed          ; because reading failed
-    ;int3
-    mov rdx, [rel num_bytes]
-    cmp rdx, 0
-    jz .read_failed          ; because user pressed ENTER without any input
 
-    mov rdx, input_buffer + 4
-    sub rsp, 32
-    call puts
-    add rsp, 32
+    ;mov eax, [rel num_bytes]
+    ;mov edx, eax
+    ;lea rcx, [rel bytes_read_fmt]
+    ;call printf
+
+    mov edx, [rel num_bytes]
+    lea rcx, [rel input_buffer]
+    call printf
+
+    ; check to see if we have `\r\n`, replace with `\0\0` if we do. Update num_bytes if necessary
+    mov eax, [rel num_bytes]
+    lea rcx, [rel input_buffer]
+    add rcx, rax
+    sub rcx, 2
+    lea rdx, [rel crlf]
+    call strcmp
+    test rax, rax
+    jnz .skip_trim
+    mov word [rcx], 0
+    sub dword [rel num_bytes], 2
+    .skip_trim:
+    mov eax, [rel num_bytes]
+    lea rcx, [rel input_buffer]
+    add rcx, rax
+    dec rcx
+    cmp byte [rcx], 0x0d
+    jnz .append_eoe
+    mov byte [rcx], 0                      ; lop off `\n`
+    sub dword [rel num_bytes], 1           ; adjust our endpoint
+    mov byte [rel cycle_promptless], 1
+
+    xor r10, r10
+    .append_eoe:
+    ; space_eoe i " eoe \0"
+    cmp r10, 5
+    jz .interpret
+    lea r11, [rel space_eoe]
+    add r11, r10
+    movzx r11, byte [r11]
+    add r12, r10
+    mov [r12], r11b
+    ;mov [rel input_buffer + r10], r11b
+    inc r10
+    jmp .append_eoe
+
+    .interpret:
+    ; body of interpret...
+    jmp .quit
+    ;mov rcx, [rel stdin_failed_msg]
+    ;call puts
+
 
 .abort:
     mov r15, 0 ; throw away the stack, but leave the values there.
@@ -140,6 +200,8 @@ main:
     and byte [rel abort_state], ~NO_ABORT
 
 .read_failed:
+    lea rcx, [rel read_failed_msg]
+    call printf
     jmp .exit_main
 .stdin_failed:
     lea rcx, [rel stdin_failed_msg]
@@ -237,6 +299,7 @@ main:
     jmp .exit_main
 
 .exit_main:
+    add rsp, 32
     pop r15
     pop r14
     pop r13
