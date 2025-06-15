@@ -21,7 +21,8 @@ section .data
     crlf              db 0x0d, 0x0a, 0
     space_eoe         db " eoe "
     cycle_promptless  db 0
-
+    test_message      db "Test message.", 10, 0
+    str_newline       db 10, 0
 section .bss
     num_bytes        resd 1
     write_count      resd 1
@@ -124,7 +125,6 @@ main:
     mov rcx, 256 ;
     xor eax, eax
     rep stosb
-
     ; set up for call to ReadFile
     ; set the current location in which to write the user's input
     mov rcx, [rel stdin_handle]     ; hFile
@@ -145,8 +145,6 @@ main:
     ;call printf
 
     mov edx, [rel num_bytes]
-    lea rcx, [rel input_buffer]
-    call printf
 
     ; check to see if we have `\r\n`, replace with `\0\0` if we do. Update num_bytes if necessary
     mov eax, [rel num_bytes]
@@ -159,33 +157,45 @@ main:
     jnz .skip_trim
     mov word [rcx], 0
     sub dword [rel num_bytes], 2
+
+    ; lea rcx, [rel test_message]
+    ; call printf
     .skip_trim:
-    mov eax, [rel num_bytes]
+    mov rax, [rel num_bytes]
+    movsx rax, eax
     lea rcx, [rel input_buffer]
     add rcx, rax
     dec rcx
     cmp byte [rcx], 0x0d
-    jnz .append_eoe
+    jnz .start_append_eoe
     mov byte [rcx], 0                      ; lop off `\n`
     sub dword [rel num_bytes], 1           ; adjust our endpoint
     mov byte [rel cycle_promptless], 1
-
+    .start_append_eoe:
     xor r10, r10
-    .append_eoe:
+    .append_loop:
     ; space_eoe i " eoe \0"
     cmp r10, 5
-    jz .interpret
+    jz .append_break
     lea r11, [rel space_eoe]
     add r11, r10
     movzx r11, byte [r11]
+    lea r12, [rel input_buffer]
     add r12, r10
+    add r12, [rel num_bytes]
     mov [r12], r11b
     ;mov [rel input_buffer + r10], r11b
     inc r10
-    jmp .append_eoe
+    jmp .append_loop
+    .append_break:
+    lea rcx, [rel input_buffer]
+    call printf
+    lea rcx, [rel str_newline]
+    call printf
 
     .interpret:
-    ; body of interpret...
+    ;lea rcx, [rel test_message]
+    ;call printf
     jmp .quit
     ;mov rcx, [rel stdin_failed_msg]
     ;call puts
