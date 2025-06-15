@@ -5,8 +5,7 @@
 BITS 64
 STD_INPUT_HANDLE       equ -10
 STD_OUTPUT_HANDLE      equ -11
-INPUT_BUFFER_SIZE      equ 256
-READ_CHUNK             equ 254   ; leave room to append '\n' or NULL, as appropriate. cf. input_buffer
+READ_CHUNK             equ 248   ; 256 - len(32-bit Length) - len("eoe") - len("\0")
 %define LINE_SIZE 8
 %define LINES_PER_BLOCK  16
 %define BLOCK_SIZE 128

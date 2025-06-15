@@ -1,0 +1,11 @@
+%ifndef NASM_STRING_NINC
+%define NASM_STRING_NINC
+
+; Our string format is for a counted null-terminated string, a belt-and-suspenders approach.
+; |32-bit length|c1, c2, c3,....|0|
+
+%macro c_str_addr 1
+    [%1 + 4]
+%endmacro
+
+%endif

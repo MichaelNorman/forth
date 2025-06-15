@@ -1,4 +1,5 @@
 %include "forth_internals.ninc"
+%include "nasm_string.ninc"
 
 section .data
     newline          db 10 ; newline character
@@ -13,15 +14,13 @@ section .data
     abort_msg         db "Aborted. TOS = 0. Ready", 10, 0
     stdin_failed_msg  db "Failed to get stdin.", 10, 0
     stdout_failed_msg db "Failed to get stdout.", 10, 0
-    handle_fmt        db "GetStdHandle returned: %llx", 10, 0
-    last_error_fmt    db "Last error code was: %lu", 10, 0
 
 section .bss
     num_bytes        resd 1
     write_count      resd 1
     old_mode         resd 1 ; place to hold the console mode before we reset it
-    ds_base          resq DATA_STACK_SIZE
-    input_buffer     resq INPUT_BUFFER_SIZE
+    ds_base          resq 256
+    input_buffer resb 256
     stdin_handle resq 1
     stdout_handle resq 1
     stderr_handle resq 1
@@ -43,10 +42,9 @@ main:
     push r13
     push r14
     push r15
-    ; reserve shadow space
-    sub rsp, 32
+    ; !!--------------ALIGNED------------------!!
 
-    ; set up stack (First thins first, but not necessarily in that order. -- Vigtor Borge)
+    ; Set up stack ("First things first, but not necessarily in that order." -- Vigtor Borge)
     ; The following four lines move ds_base to the address at the end of its allocated space. This preserves 0-based
     ; indices if we do [rel ds_base - index * 8]
     lea r12, [rel ds_base] ; ds_base is "upside down" from our downward growing stack
@@ -58,41 +56,80 @@ main:
     mov r15, 0
     %undef ds_top  ; reusing this could lead to subtle bugs or subtle corruption. r15 will contain the value for the
                    ; program lifetime
-    ; THE FOLLOWING LINES SUCCEED
-    lea rcx, [rel pre_msg]
-    call puts
+
     ; get stdin
     mov ecx, GET_STDIN_HANDLE
+    sub rsp, 32
     call GetStdHandle
-    call GetLastError
-    lea rcx, [rel last_error_fmt]
-    mov rdx, rax
-    call printf
+    add rsp, 32
     cmp rax, -1
     je .stdin_failed
-    lea rcx, [rel handle_fmt]
-    mov rdx, rax
-    call printf
-
-    ;default rel
-    ; THE FOLLOWING LINE FAILS
-    mov [rel stdin_handle], rdx       ; stdin
-    ; THE FOLLOWING LINES NEVER RUN
-    lea rcx, [rel abort_msg]
-    call puts
 
     ; get stdout
     mov ecx, GET_STDOUT_HANDLE
+    sub rsp, 32
     call GetStdHandle
-
+    add rsp, 32
     cmp rax, -1 ; valid?
     je .stdout_failed
 
     mov [rel stdout_handle], rax       ; stdout
-    lea rcx, [rel abort_msg]
-    call puts
     ;testing abort message logic
     or byte [rel abort_state], NO_ABORT
+; This Forth interpreter will be "free-running," rather than count=based. Rather than checking for `\0' at every
+; step, we mandate an end-of-execution, or EOE, word. This is an internal word that .quit: must add to evey line of
+; input before calling the interpreter. If multiline entry mode is implemented later, the user will have to type the `f`
+; word, euphemistically referred to as "the do character," to call Forth on the accumulated input. It is probably that
+; the do character will be translated to the EOE word before the interpreter is called.
+
+; The general algorithm for the initial case is then:
+;   zero out the input_buffer
+;   get a line of input at least 8 = 4 + len("eoe") + 1 bytes shorter than the buffer size, starting 4 bytes in
+;   write the number of characters into the first four bytes
+;   append "eoe" to it
+;   fall through to .interpret: starting four bytes in
+;   jump to .quit:
+;
+; The general algorithm for the fancypants case is then:
+;   zero out the input buffer
+;   get a line of input at least 8 = 4 + len("eoe") + 1 bytes shorter than the buffer size, starting 4 bytes in
+;   check for trailing `f`, substitute eoe if `f` present and set interpret flag
+;   write the adjusted number of characters into the first four bytes
+;   .accumulate: starting four bytes in
+;   jump to .quit: if interpret flag not set
+;   fall through to .interpret:
+;   zero out accumulator and reset pointer
+;   jump to .quit:
+
+.quit:
+    ; zero out input_buffer
+    mov rdi, input_buffer ; load address of input_buffer
+    ; get a line of input at least 8 = 4 + len("eoe") + 1 bytes shorter than the buffer size, starting 4 bytes in
+    mov rcx, 256 ;
+    xor eax, eax
+    rep stosb
+    ; set up for call to ReadFile
+    ; set the current location in which to write the user's input
+    mov rcx, [rel stdin_handle]     ; hFile
+    lea rdx, [rel input_buffer + 4]     ; lpBuffer
+    mov r8d, 248                    ; nNumberOfBytesToRead: 256 - len(dword) - len("eoe") - len("\0")
+    lea r9, [rel num_bytes]         ; lpNumberOfBytesRead
+    sub rsp, 48
+    mov qword [rsp + 0x20], 0              ; lpOverlapped, stored in first argument space
+    call ReadFile
+    add rsp, 48
+    ; rax contains success or failure
+    test rax, rax
+    jz .read_failed          ; because reading failed
+    ;int3
+    mov rdx, [rel num_bytes]
+    cmp rdx, 0
+    jz .read_failed          ; because user pressed ENTER without any input
+
+    mov rdx, input_buffer + 4
+    sub rsp, 32
+    call puts
+    add rsp, 32
 
 .abort:
     mov r15, 0 ; throw away the stack, but leave the values there.
@@ -101,39 +138,6 @@ main:
     lea  rcx, [rel abort_msg]
     call puts
     and byte [rel abort_state], ~NO_ABORT
-
-.quit:
-    ; zero out input_buffer
-    mov rdi, input_buffer ; load address of input_buffer
-    mov rcx, 256 ;
-    xor eax, eax
-    rep stosb
-    ; set up for call to ReadFile
-    ; set the current location in which to write the user's input
-    mov rcx, [rel stdin_handle]     ; hFile
-    lea rdx, [rel input_buffer]     ; lpBuffer
-    mov r8d, READ_CHUNK             ; nNumberOfBytesToRead
-    lea r9, [rel num_bytes]         ; lpNumberOfBytesRead
-    sub rsp, 16
-    mov qword [rsp], 0              ; lpOverlapped, stored in first argument space
-    call ReadFile
-    add rsp, 16
-    ;int3
-    ; rax contains success or failure
-    test rax, rax
-    je .read_failed          ; because reading failed
-    ;int3
-    mov rdx, [rel num_bytes] ; TODO: test this. Went from `lea`to `mov`
-    cmp rdx, 0
-    je .read_failed          ; because user pressed ENTER without any input
-
-    ; TODO: Rework this into Forth's `auit` loop.
-    ;jmp .quit
-
-    sub rsp, 16
-    call printf
-    add rsp, 16
-    ;jmp .line_loop ; TODO: Rework this into Forth's `auit` loop.
 
 .read_failed:
     jmp .exit_main
@@ -237,6 +241,5 @@ main:
     pop r14
     pop r13
     pop r12
-    add rsp, 32
     pop rbp
     ret
